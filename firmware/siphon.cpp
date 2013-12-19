@@ -53,7 +53,7 @@ void sendSpeedLimits() {
 	Serial.write(highByte(upload));
 }
 
-void setup(void)
+void setup()
 {
 	Serial.begin(SERIAL_SPEED);
 
@@ -67,13 +67,18 @@ void setup(void)
 	pinMode(HAS_UPLOAD_PIN, OUTPUT);
 }
 
-void loop(void)
+void loop()
 {
 	static unsigned long last_data_time = 0;
 
 	if ( Serial.available() >= 6 ) {
-		displaySpeed(readUnsigned(), readUnsigned());
-		displayActives(Serial.read(), Serial.read());
+		unsigned download = readUnsigned();
+		unsigned upload = readUnsigned();
+		unsigned char d_state = Serial.read();
+		unsigned char u_state = Serial.read();
+
+		displaySpeed(download, upload);
+		displayActives(d_state, u_state);
 
 		last_data_time = millis();
 		digitalWrite(NO_DATA_PIN, LOW);
