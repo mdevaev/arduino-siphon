@@ -1,0 +1,151 @@
+# Arduino sketch Makefile
+# Copyright (C) 2010-2011 Devaev Maxim <mdevaev@gmail.com>
+#
+# This Makefile allows you to build sketches from the CLI without the Arduino IDE and Java
+#
+# Based on Makefile from official wiki
+#  http://www.arduino.cc/en/uploads/Hacking/Makefile
+#
+# Arduino libraries can be downloded from:
+#  git clone git://github.com/arduino/Arduino.git
+#
+# API reference:
+#  http://arduino.cc/en/Reference/HomePage
+#
+# The Arduino environment does preliminary processing on a sketch before compiling it.
+# If you're using this Makefile instead, you'll need to do a few things differently:
+#  - Give your program's file a .cpp extension (e.g. foo.cpp);
+#  - Put this line at top of your code: #include <Arduino.h> (and other headers);
+#  - Write prototypes for all your functions;
+#
+# UPLOAD_RATE: 300, 1200, 2400, 4800, 9600, 14400, 19200, 38400, 57600, 115200
+#####
+
+
+BOARD = micro
+PORT = /dev/ttyACM0
+
+# Basic controller options (by default sets for Arduino Mega 1280)
+# See files boards.txt and programmers.txt in /usr/share/arduino/hardware/arduino for choose options for your controller
+BOARDS_TXT = /usr/share/arduino/hardware/arduino/boards.txt
+MCU = $(shell grep '$(BOARD).build.mcu' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+F_CPU = $(shell grep '$(BOARD).build.f_cpu' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+CORE = $(shell grep '$(BOARD).build.core' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+VARIANT = $(shell grep '$(BOARD).build.variant' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+FORMAT = ihex
+PROGRAMMER = $(shell grep '$(BOARD).upload.protocol' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+UPLOAD_RATE = $(shell grep '$(BOARD).upload.speed' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+USB_VID = $(shell grep '$(BOARD).build.vid' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+USB_PID = $(shell grep '$(BOARD).build.pid' $(BOARDS_TXT) | sed 's/[^=]*=\(.*\)/\1/g')
+AVRDUDE_FORMAT=:i
+
+# Arduino libraries version and path to sources and headers
+ARDUINO_VERSION = 23
+ARDUINO_SRC = /usr/share/arduino/hardware/arduino/cores/$(CORE) /usr/share/arduino/hardware/arduino/variants/$(VARIANT) /usr/share/arduino/hardware/arduino/variants/leonardo
+# ... insert additional libs here ^^^, for example, /usr/share/arduino/libraries/EEPROM
+
+# Tools
+MAKE = make
+CC = avr-gcc
+CXX = avr-g++
+OBJCOPY = avr-objcopy
+OBJDUMP = avr-objdump
+SIZE = avr-size
+NM = avr-nm
+AVRDUDE = avrdude
+PYTHON = python2
+MKDIR = mkdir
+CP = cp
+RM = rm
+
+# Project settings and sources
+PROJECT = siphon
+ARDUINO_LOCAL = buildlibs
+ARDUINO_LOCAL_SRC = $(shell for src in $(ARDUINO_SRC); do echo "$(ARDUINO_LOCAL)/`basename $$src` "; done)
+CSRC = $(shell find . -name '*.c' | grep -vi '\<examples\>')
+CXXSRC = $(shell find . -name '*.cpp' | grep -vi '\<examples\>')
+OBJ = $(CSRC:.c=.o) $(CXXSRC:.cpp=.o)
+
+# Place -D or -U options here
+CDEFS = -DF_CPU=$(F_CPU) -DARDUINO=$(ARDUINO_VERSION) -DUSB_VID=$(USB_VID) -DUSB_PID=$(USB_PID)
+CXXDEFS = -DF_CPU=$(F_CPU) -DARDUINO=$(ARDUINO_VERSION) -DUSB_VID=$(USB_VID) -DUSB_PID=$(USB_PID)
+
+# Place -I options here
+CINCS = $(shell for path in $(ARDUINO_LOCAL_SRC); do echo -n "-I$$path "; done)
+CXXINCS = $(shell for path in $(ARDUINO_LOCAL_SRC); do echo -n "-I$$path "; done)
+
+# Compiler and linker options from Arduino IDE
+CFLAGS = -g -Os -w -ffunction-sections -fdata-sections -mmcu=$(MCU) $(CDEFS) $(CINCS)
+CXXFLAGS = -g -Os -w -fno-exceptions -ffunction-sections -fdata-sections -mmcu=$(MCU) $(CXXDEFS) $(CXXINCS)
+LDFLAGS = -Wl,--gc-section
+
+
+##### Targets #####
+.SUFFIXES : .elf .hex .eep .lss .sym
+
+.c.o :
+	$(CC) -c $(CFLAGS) $< -o $@
+
+.cpp.o :
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+.elf.hex :
+	$(OBJCOPY) -O $(FORMAT) -R .eeprom $< $@
+
+.elf.eep :
+	$(OBJCOPY) -j .eeprom --set-section-flags=.eeprom="alloc,load" --change-section-lma .eeprom=0 -O $(FORMAT) $< $@
+
+.elf.lss :
+	$(OBJDUMP) -h -S $< > $@
+
+.elf.sym :
+	$(NM) -n $< > $@
+
+
+all : $(ARDUINO_LOCAL_SRC)
+	$(MAKE) elf hex
+
+elf : $(PROJECT).elf
+hex : $(PROJECT).hex
+eep : $(PROJECT).eep
+lss : $(PROJECT).lss
+sym : $(PROJECT).sym
+
+$(PROJECT).elf : $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) --output $@ $(LDFLAGS)
+
+$(ARDUINO_LOCAL_SRC) :
+	$(MKDIR) -p $(ARDUINO_LOCAL)
+	for src in $(ARDUINO_SRC); do \
+		if [ `basename $@` = `basename $$src` ]; then $(CP) -a $$src $(ARDUINO_LOCAL); fi; \
+	done
+
+
+upload : $(PROJECT).hex
+	$(AVRDUDE) -F -p $(MCU) -P $(PORT) -c $(PROGRAMMER) -b $(UPLOAD_RATE) -D -U flash:w:$(PROJECT).hex$(AVRDUDE_FORMAT)
+
+
+coff : $(PROJECT).elf
+	$(OBJCOPY) --debugging \
+		--change-section-address .data-0x800000 \
+		--change-section-address .bss-0x800000 \
+		--change-section-address .noinit-0x800000 \
+		--change-section-address .eeprom-0x810000 -O coff-avr $(PROJECT).elf $(PROJECT).cof
+
+extcoff : $(PROJECT).elf
+	$(OBJCOPY) --debugging \
+		--change-section-address .data-0x800000 \
+		--change-section-address .bss-0x800000 \
+		--change-section-address .noinit-0x800000 \
+		--change-section-address .eeprom-0x810000 -O coff-ext-avr $(PROJECT).elf $(PROJECT).cof
+
+
+clean :
+	$(RM) -f $(PROJECT).hex $(PROJECT).eep $(PROJECT).cof $(PROJECT).elf $(PROJECT).map $(PROJECT).sym $(PROJECT).lss $(OBJ)
+
+clean-all : clean
+	$(RM) -rf $(ARDUINO_LOCAL)
+
+
+.PHONY: all elf hex eep lss sym program coff extcoff clean clean-all
+
