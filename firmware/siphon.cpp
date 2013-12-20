@@ -28,8 +28,8 @@ inline unsigned mapLimit(unsigned rate) {
 }
 
 inline unsigned readUnsigned() {
-	unsigned char low = lowByte(Serial.read());
-	unsigned char high = highByte(Serial.read());
+	unsigned char low = Serial.read();
+	unsigned char high = Serial.read();
 	return makeWord(high, low);
 }
 
