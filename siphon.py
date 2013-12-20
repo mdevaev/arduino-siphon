@@ -43,14 +43,15 @@ class Server :
 def main() :
 	siphon = Siphon("/dev/ttyACM0", 115200)
 	server = Server("http://192.168.0.2/RPC2")
-	a, b = (0, 0)
 	while True :
-		#(speed_down, speed_up) = server.getSpeed()
-		#siphon.send(speed_down, speed_up, False, False)
-		siphon.send(a, b, True, False)
-		a, b = siphon.receive()
-		print (a, b)
-#		server.setSpeedLimits(*siphon.getSpeedLimits())
+		(download, upload) = server.getSpeed()
+		print("%s; siphon << server: speed:  %d / %d" % (time.ctime(), download, upload))
+		siphon.send(download, upload, False, False)
+
+		(download, upload) = siphon.receive()
+		server.setSpeedLimits(download, upload)
+		print("%s; siphon >> server: limits: %d / %d" % (time.ctime(), download, upload))
+
 		time.sleep(1)
 
 if __name__ == "__main__" :
