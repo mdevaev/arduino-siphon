@@ -25,10 +25,10 @@ class Server :
 		self._prev_up = None
 
 	def getSpeed(self) :
-		return map(lambda arg : int(arg * 8.0 / (1024.0 ** 2)), (
-				self._server.get_down_rate(),
-				self._server.get_up_rate(),
-			))
+		return (
+			int(self._server.get_down_rate() * 8.0 / (1024.0 ** 2)),
+			int(self._server.get_up_rate() * 8.0 / (1024.0 ** 2)),
+		)
 
 	def setSpeedLimits(self, download, upload) :
 		if self._prev_down != download :
@@ -46,7 +46,7 @@ def main() :
 	while True :
 		(download, upload) = server.getSpeed()
 		print("%s; siphon << server: speed:  %d / %d" % (time.ctime(), download, upload))
-		siphon.send(download, upload, False, False)
+		siphon.send(download, upload, download != 0, upload != 0)
 
 		(download, upload) = siphon.receive()
 		server.setSpeedLimits(download, upload)
