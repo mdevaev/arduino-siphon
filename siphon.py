@@ -9,78 +9,85 @@ import time
 import logging
 
 
-##### Public classes #####
-class Siphon :
-	def __init__(self, port, speed) :
-		self._tty = serial.Serial(port, speed)
+# =====
+class Siphon:
+    def __init__(self, device):
+        self._tty = serial.Serial(device, 115200)
 
-	def send(self, download, upload, download_flag, upload_flag) :
-		self._tty.write(struct.pack("<HHcc", download, upload, self._makeByte(download_flag), self._makeByte(upload_flag)))
+    def send(self, download, upload, has_download, has_upload):
+        self._tty.write(struct.pack("<cHccccc", *((b"\x01", download) + (b"\x00",) * 5)))
+        self._tty.write(struct.pack("<cHccccc", *((b"\x02", upload) + (b"\x00",) * 5)))
+        self._tty.write(struct.pack("<cccccccc", *((b"\x03", self._make_byte(has_download)) + (b"\x00",) * 6)))
+        self._tty.write(struct.pack("<cccccccc", *((b"\x04", self._make_byte(has_upload)) + (b"\x00",) * 6)))
 
-	def receive(self) :
-		return struct.unpack("<HH", self._tty.read(4))
+    def _make_byte(self, value):
+        return bytes([int(value)])
 
-	def _makeByte(self, value) :
-		return bytes([int(value)])
-
-class Server :
-	def __init__(self, url) :
-		self._server = xmlrpc.client.ServerProxy(url)
-		self._prev_down = None
-		self._prev_up = None
-
-	def getSpeed(self) :
-		multicall = xmlrpc.client.MultiCall(self._server)
-		multicall.get_down_rate()
-		multicall.get_up_rate()
-		return tuple(map(self._makeSpeed, multicall()))
-
-	def setSpeedLimits(self, download, upload) :
-		if self._prev_down != download or self._prev_up != upload :
-			multicall = xmlrpc.client.MultiCall(self._server)
-			if self._prev_down != download :
-				multicall.set_download_rate(self._makeLimit(download))
-				self._prev_down = download
-			if self._prev_up != upload :
-				multicall.set_upload_rate(self._makeLimit(upload))
-				self._prev_up = upload
-			multicall()
-			return True
-		return False
-
-	def _makeSpeed(self, speed) :
-		return int(speed * 8.0 / (1024.0 ** 2))
-
-	def _makeLimit(self, speed) :
-		return int(speed / 8.0 * (1024.0 ** 2))
+    def receive(self):
+        self._tty.write(struct.pack("<cccccccc", *((b"\x05",) + (b"\x00",) * 7)))
+        download = struct.unpack("<H", self._tty.read(2))[0]
+        self._tty.write(struct.pack("<cccccccc", *((b"\x06",) + (b"\x00",) * 7)))
+        upload = struct.unpack("<H", self._tty.read(2))[0]
+        return (download, upload)
 
 
-##### Main #####
-def main() :
-	assert len(sys.argv) == 3
+class Server:
+    def __init__(self, url) :
+        self._server = xmlrpc.client.ServerProxy(url)
+        self._prev_down = None
+        self._prev_up = None
 
-	logger = logging.getLogger("siphon")
-	logger.setLevel(logging.DEBUG)
-	handler = logging.StreamHandler()
-	handler.setLevel(logging.DEBUG)
-	formatter = logging.Formatter("%(asctime)s - %(name)s [%(levelname)s]: %(message)s")
-	handler.setFormatter(formatter)
-	logger.addHandler(handler)
+    def get_speed(self) :
+        multicall = xmlrpc.client.MultiCall(self._server)
+        multicall.get_down_rate()
+        multicall.get_up_rate()
+        return tuple(map(self._make_speed, multicall()))
 
-	server = Server(sys.argv[1])
-	siphon = Siphon(sys.argv[2], 115200)
+    def set_speed_limits(self, download, upload) :
+        if self._prev_down != download or self._prev_up != upload :
+            multicall = xmlrpc.client.MultiCall(self._server)
+            if self._prev_down != download :
+                multicall.set_download_rate(self._make_limit(download))
+                self._prev_down = download
+            if self._prev_up != upload :
+                multicall.set_upload_rate(self._make_limit(upload))
+                self._prev_up = upload
+            multicall()
+            return True
+        return False
 
-	while True :
-		(download, upload) = server.getSpeed()
-		logger.info("siphon << server: speed:  D:%d / U:%d", download, upload)
-		siphon.send(download, upload, download != 0, upload != 0)
+    def _make_speed(self, speed) :
+        return int(speed * 8.0 / (1024.0 ** 2))
 
-		(download, upload) = siphon.receive()
-		if server.setSpeedLimits(download, upload) :
-			logger.info("siphon >> server: limits: D:%d / U:%d", download, upload)
-		time.sleep(1)
+    def _make_limit(self, speed) :
+        return int(speed / 8.0 * (1024.0 ** 2))
+
+
+# =====
+def main():
+    assert len(sys.argv) == 3
+
+    logger = logging.getLogger("siphon")
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s - %(name)s [%(levelname)s]: %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    server = Server(sys.argv[1])
+    siphon = Siphon(sys.argv[2])
+
+    while True :
+        (download, upload) = server.get_speed()
+        logger.info("siphon << server: speed:  D:%d / U:%d", download, upload)
+        siphon.send(download, upload, download != 0, upload != 0)
+
+        (download, upload) = siphon.receive()
+        if server.set_speed_limits(download, upload):
+            logger.info("siphon >> server: limits: D:%d / U:%d", download, upload)
+        time.sleep(1)
 
 
 if __name__ == "__main__" :
-	main()
-
+    main()

@@ -16,7 +16,7 @@
 
 
 inline unsigned getFactor() {
-	return ( digitalRead(FACTOR_PIN) == HIGH ? 1000 : 100 );
+	return ( digitalRead(FACTOR_PIN) == HIGH ? 100 : 1000 );
 }
 
 inline unsigned mapRate(unsigned rate) {
@@ -27,34 +27,36 @@ inline unsigned mapLimit(unsigned rate) {
 	return map(rate, 0, 1023, 0, getFactor());
 }
 
-inline unsigned readUnsigned() {
-	unsigned char low = Serial.read();
-	unsigned char high = Serial.read();
-	return makeWord(high, low);
+
+bool processCommand(unsigned char *cmd) {
+	switch (cmd[0]) {
+		case 0: Serial.println("siphon"); return false;
+
+		case 1: analogWrite(DOWNLOAD_PIN, mapRate(makeWord(cmd[2], cmd[1]))); return true;  // high, low
+		case 2: analogWrite(UPLOAD_PIN, mapRate(makeWord(cmd[2], cmd[1]))); return true;
+
+		case 3: digitalWrite(HAS_DOWNLOAD_PIN, cmd[1] ? HIGH : LOW); return true;
+		case 4: digitalWrite(HAS_UPLOAD_PIN, cmd[1] ? HIGH : LOW); return true;
+
+		case 5: {
+			int download = mapLimit(analogRead(DOWNLOAD_LIMIT_PIN));
+			Serial.write(lowByte(download));
+			Serial.write(highByte(download));
+		}; return true;
+
+		case 6: {
+			int upload = mapLimit(analogRead(UPLOAD_LIMIT_PIN));
+			Serial.write(lowByte(upload));
+			Serial.write(highByte(upload));
+		}; return true;
+
+		default: break;
+	}
+	return false;
 }
 
-void displaySpeed(unsigned download, unsigned upload) {
-	analogWrite(DOWNLOAD_PIN, mapRate(download));
-	analogWrite(UPLOAD_PIN, mapRate(upload));
-}
 
-void displayActives(unsigned char download, unsigned char upload) {
-	digitalWrite(HAS_DOWNLOAD_PIN, download ? HIGH : LOW);
-	digitalWrite(HAS_UPLOAD_PIN, upload ? HIGH : LOW);
-}
-
-void sendSpeedLimits() {
-	int download = mapLimit(analogRead(DOWNLOAD_LIMIT_PIN));
-	Serial.write(lowByte(download));
-	Serial.write(highByte(download));
-
-	int upload = mapLimit(analogRead(UPLOAD_LIMIT_PIN));
-	Serial.write(lowByte(upload));
-	Serial.write(highByte(upload));
-}
-
-void setup()
-{
+void setup() {
 	Serial.begin(SERIAL_SPEED);
 
 	analogWrite(DOWNLOAD_PIN, 0);
@@ -67,24 +69,19 @@ void setup()
 	pinMode(HAS_UPLOAD_PIN, OUTPUT);
 }
 
-void loop()
-{
+void loop() {
 	static unsigned long last_data_time = 0;
+    unsigned char cmd[8];
 
-	if ( Serial.available() >= 6 ) {
-		unsigned download = readUnsigned();
-		unsigned upload = readUnsigned();
-		unsigned char d_state = Serial.read();
-		unsigned char u_state = Serial.read();
-
-		displaySpeed(download, upload);
-		displayActives(d_state, u_state);
-
-		last_data_time = millis();
-		digitalWrite(NO_DATA_PIN, LOW);
-
-		sendSpeedLimits();
-	}
+    if ( Serial.available() >= 8 ) {
+        for (int count = 0; count < 8; ++count) {
+            cmd[count] = Serial.read();
+        }
+        if (processCommand(cmd)) {
+            last_data_time = millis();
+            digitalWrite(NO_DATA_PIN, LOW);
+        }
+    }
 
 	unsigned long current_time = millis();
 	if ( ( current_time >= last_data_time && current_time - last_data_time >= MAX_NO_DATA ) ||
